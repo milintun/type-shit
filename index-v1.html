@@ -13,8 +13,8 @@
     :root {
       --bg: #0d0d0f;
       --surface: #141418;
-      --muted: #3a3a44;
-      --text-ui: #888;
+      --muted: #55555f;
+      --text-ui: #aaa;
     }
 
     html, body {
@@ -77,7 +77,7 @@
       padding: 10px 28px;
       background: transparent;
       border: 1px solid var(--muted);
-      color: #ccc;
+      color: #e0e0e0;
       border-radius: 4px;
       cursor: pointer;
       transition: all 0.2s;
@@ -317,15 +317,23 @@ function audioToStyle({ pitch, volume }) {
   const v = Math.max(0, Math.min(1, volume));
   const p = Math.max(0, Math.min(1, pitch));
 
+  // Use pitch to shift hue: low=deep blue/purple, high=hot orange/red/yellow
+  const lowPitch  = p < 0.5 ? lerpColor('#3A1AAA', '#3B8BD4', p * 2)       : '#3B8BD4';
+  const highPitch = p > 0.5 ? lerpColor('#E8593C', '#FFE800', (p - 0.5) * 2) : '#E8593C';
+  const color = p < 0.5 ? lowPitch : lerpColor('#E8593C', highPitch, (p - 0.5) * 2);
+
+  const vPow = Math.pow(v, 1.5); // sharper volume curve
+  const pPow = Math.pow(p, 0.8);
+
   return {
-    fontSize:      lerp(18, 96, v),
-    fontWeight:    Math.round(lerp(300, 900, v) / 100) * 100,
-    letterSpacing: lerp(-1, 14, p),
-    opacity:       lerp(0.4, 1.0, v),
-    skewX:         lerp(0, 12, p),
-    color:         lerpColor('#3B8BD4', '#E8593C', p),
-    textShadow:    v > 0.7 ? `0 0 ${(v * 20).toFixed(1)}px currentColor` : 'none',
-    filter:        v < 0.15 ? `blur(${((0.15 - v) * 8).toFixed(2)}px)` : 'none',
+    fontSize:      lerp(14, 160, vPow),
+    fontWeight:    Math.round(lerp(100, 900, vPow) / 100) * 100,
+    letterSpacing: lerp(-2, 24, pPow),
+    opacity:       lerp(0.5, 1.0, v),
+    skewX:         lerp(0, 20, pPow),
+    color:         color,
+    textShadow:    v > 0.5 ? `0 0 ${(v * 40).toFixed(1)}px currentColor, 0 0 ${(v * 80).toFixed(1)}px currentColor` : 'none',
+    filter:        v < 0.1 ? `blur(${((0.1 - v) * 12).toFixed(2)}px)` : 'none',
   };
 }
 
@@ -339,8 +347,8 @@ const pendingSpan = document.createElement('span');
 pendingSpan.className = 'word-chunk pending';
 container.appendChild(pendingSpan);
 
-const FADE_DELAY    = 7000; // ms before fade starts
-const FADE_DURATION = 2500; // ms for the fade itself
+const FADE_DELAY    = 0;    // ms before fade starts
+const FADE_DURATION = 400;  // ms for the fade itself
 
 function renderWordChunk(text, audioState, isFinal) {
   const style = audioToStyle(audioState);
