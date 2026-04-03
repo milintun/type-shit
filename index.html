@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Typography</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,100..900&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d0d0f;
+      --surface: #141418;
+      --muted: #3a3a44;
+      --text-ui: #888;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: #eee;
+      font-family: 'Fraunces', Georgia, serif;
+      overflow: hidden;
+    }
+
+    /* ── Layout ── */
+    #app {
+      display: grid;
+      grid-template-rows: 1fr auto;
+      height: 100vh;
+    }
+
+    #word-container {
+      padding: 48px 48px 24px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      align-content: flex-start;
+      gap: 0;
+      overflow-y: auto;
+      scrollbar-width: none;
+    }
+    #word-container::-webkit-scrollbar { display: none; }
+
+    .word-chunk {
+      display: inline-block;
+      margin-right: 0.18em;
+      transition: all 0.1s ease;
+      line-height: 1.1;
+      font-family: 'Fraunces', Georgia, serif;
+    }
+    .word-chunk.pending {
+      transition: all 0.08s ease;
+    }
+    .word-chunk.final {
+      transition: none;
+    }
+
+    /* ── Controls bar ── */
+    #controls {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 20px 48px;
+      border-top: 1px solid var(--muted);
+      background: var(--surface);
+    }
+
+    #start-btn {
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 10px 28px;
+      background: transparent;
+      border: 1px solid var(--muted);
+      color: #ccc;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    #start-btn:hover { border-color: #888; color: #fff; }
+    #start-btn.active {
+      border-color: #c44;
+      color: #f88;
+    }
+    #start-btn.active:hover { border-color: #f66; }
+
+    #status {
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      color: var(--text-ui);
+      min-width: 90px;
+    }
+    #status.live { color: #6c6; }
+    #status.error-text { color: #f66; }
+
+    /* Debug meters */
+    #debug {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-left: auto;
+    }
+    .meter-label {
+      font-size: 10px;
+      letter-spacing: 0.08em;
+      color: var(--text-ui);
+      text-transform: uppercase;
+      font-family: monospace;
+    }
+    .meter-track {
+      width: 80px;
+      height: 4px;
+      background: var(--muted);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .meter-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.05s linear;
+      width: 0%;
+    }
+    #vol-fill  { background: #6b9fff; }
+    #pitch-fill { background: #ff7a5a; }
+
+    #error-banner {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      background: #500;
+      color: #fcc;
+      text-align: center;
+      padding: 12px 20px;
+      font-size: 14px;
+      z-index: 100;
+    }
+
+    #browser-warn {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: var(--bg);
+      color: #aaa;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      font-size: 16px;
+      text-align: center;
+    }
+    #browser-warn strong { color: #fff; font-size: 22px; }
+  </style>
+</head>
+<body>
+
+<div id="error-banner"></div>
+
+<div id="browser-warn" style="display:none">
+  <strong>Chrome or Edge required</strong>
+  The Web Speech API is only supported in Chrome and Edge.<br>
+  Please open this page in Chrome desktop.
+</div>
+
+<div id="app">
+  <div id="word-container"></div>
+
+  <div id="controls">
+    <button id="start-btn">Start</button>
+    <span id="status"></span>
+
+    <div id="debug">
+      <span class="meter-label">vol</span>
+      <div class="meter-track"><div class="meter-fill" id="vol-fill"></div></div>
+      <span class="meter-label">pitch</span>
+      <div class="meter-track"><div class="meter-fill" id="pitch-fill"></div></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Browser support check ────────────────────────────────────────────────────
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SpeechRec) {
+  document.getElementById('browser-warn').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+}
+
+// ── State ────────────────────────────────────────────────────────────────────
+const State = { IDLE: 'idle', LISTENING: 'listening' };
+let appState = State.IDLE;
+let isListening = false;
+let currentAudioState = { volume: 0, pitch: 0.5 };
+let lastKnownPitch = 0.5;
+let rafId = null;
+
+// ── Audio pipeline ───────────────────────────────────────────────────────────
+let audioCtx, analyser, timeDomainBuf;
+
+async function setupAudio() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  audioCtx = new AudioContext();
+  const source = audioCtx.createMediaStreamSource(stream);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;
+  source.connect(analyser);
+  timeDomainBuf = new Float32Array(analyser.fftSize);
+}
+
+function computeFrame() {
+  analyser.getFloatTimeDomainData(timeDomainBuf);
+
+  // RMS volume
+  let sum = 0;
+  for (let i = 0; i < timeDomainBuf.length; i++) sum += timeDomainBuf[i] * timeDomainBuf[i];
+  const rms = Math.sqrt(sum / timeDomainBuf.length);
+  // Normalize: typical loud ~0.3-0.4, max ~0.8
+  const volume = Math.min(1, rms / 0.35);
+
+  // Pitch via autocorrelation
+  const hz = autoCorrelate(timeDomainBuf, audioCtx.sampleRate);
+  let pitch;
+  if (hz > 0) {
+    // Normalize 80-400Hz speech range to [0,1]
+    pitch = Math.max(0, Math.min(1, (hz - 80) / (400 - 80)));
+    lastKnownPitch = pitch;
+  } else {
+    pitch = lastKnownPitch; // fall back to last known
+  }
+
+  return { volume, pitch };
+}
+
+function autoCorrelate(buf, sampleRate) {
+  const n = buf.length;
+
+  // Quick energy check
+  let rms = 0;
+  for (let i = 0; i < n; i++) rms += buf[i] * buf[i];
+  if (rms / n < 0.0001) return -1;
+
+  // Only check lags in the human speech range (80–400 Hz)
+  const minLag = Math.floor(sampleRate / 400); // ~110 at 44100
+  const maxLag = Math.min(Math.ceil(sampleRate / 80), Math.floor(n / 2)); // ~551
+
+  // Zero-lag (normalization denominator)
+  let zeroCorr = 0;
+  for (let i = 0; i < n; i++) zeroCorr += buf[i] * buf[i];
+
+  let bestCorr = 0;
+  let bestLag = -1;
+
+  for (let lag = minLag; lag <= maxLag; lag++) {
+    let corr = 0;
+    const len = n - lag;
+    for (let i = 0; i < len; i++) corr += buf[i] * buf[i + lag];
+    const normalized = corr / (zeroCorr || 1);
+    if (normalized > bestCorr) {
+      bestCorr = normalized;
+      bestLag = lag;
+    }
+  }
+
+  if (bestCorr < 0.25 || bestLag < 1) return -1;
+
+  // Parabolic interpolation for sub-sample accuracy
+  if (bestLag > 1 && bestLag < n / 2 - 1) {
+    const y1 = bestLag > minLag ? autocorrAt(buf, n, bestLag - 1) / zeroCorr : 0;
+    const y2 = bestCorr;
+    const y3 = autocorrAt(buf, n, bestLag + 1) / zeroCorr;
+    const denom = y1 - 2 * y2 + y3;
+    if (denom !== 0) {
+      const refinedLag = bestLag - (y3 - y1) / (2 * denom);
+      return sampleRate / refinedLag;
+    }
+  }
+
+  return sampleRate / bestLag;
+}
+
+function autocorrAt(buf, n, lag) {
+  let c = 0;
+  const len = n - lag;
+  for (let i = 0; i < len; i++) c += buf[i] * buf[i + lag];
+  return c;
+}
+
+// rAF loop
+function tick() {
+  rafId = requestAnimationFrame(tick);
+  if (!analyser) return;
+  currentAudioState = computeFrame();
+  updateMeters(currentAudioState.volume, currentAudioState.pitch);
+}
+
+// ── Mapping ──────────────────────────────────────────────────────────────────
+function lerpColor(hex1, hex2, t) {
+  const p = h => [
+    parseInt(h.slice(1, 3), 16),
+    parseInt(h.slice(3, 5), 16),
+    parseInt(h.slice(5, 7), 16),
+  ];
+  const lerp = (a, b, t) => Math.round(a + (b - a) * t);
+  const [r1, g1, b1] = p(hex1);
+  const [r2, g2, b2] = p(hex2);
+  return '#' + [lerp(r1,r2,t), lerp(g1,g2,t), lerp(b1,b2,t)]
+    .map(v => v.toString(16).padStart(2, '0')).join('');
+}
+
+function audioToStyle({ pitch, volume }) {
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const v = Math.max(0, Math.min(1, volume));
+  const p = Math.max(0, Math.min(1, pitch));
+
+  return {
+    fontSize:      lerp(18, 96, v),
+    fontWeight:    Math.round(lerp(300, 900, v) / 100) * 100,
+    letterSpacing: lerp(-1, 14, p),
+    opacity:       lerp(0.4, 1.0, v),
+    skewX:         lerp(0, 12, p),
+    color:         lerpColor('#3B8BD4', '#E8593C', p),
+    textShadow:    v > 0.7 ? `0 0 ${(v * 20).toFixed(1)}px currentColor` : 'none',
+    filter:        v < 0.15 ? `blur(${((0.15 - v) * 8).toFixed(2)}px)` : 'none',
+  };
+}
+
+// ── Renderer ─────────────────────────────────────────────────────────────────
+const container = document.getElementById('word-container');
+
+// One persistent pending span — always lives at the end of the container.
+// Interim results replace its content in-place. Final results clone it into
+// a committed span inserted before it, then clear it for the next phrase.
+const pendingSpan = document.createElement('span');
+pendingSpan.className = 'word-chunk pending';
+container.appendChild(pendingSpan);
+
+const FADE_DELAY    = 7000; // ms before fade starts
+const FADE_DURATION = 2500; // ms for the fade itself
+
+function renderWordChunk(text, audioState, isFinal) {
+  const style = audioToStyle(audioState);
+
+  if (!isFinal) {
+    // Replace in-place — no append
+    applySpanStyle(pendingSpan, text, style, false);
+  } else {
+    // Commit: stamp a frozen span before the pending span
+    const finalSpan = document.createElement('span');
+    finalSpan.className = 'word-chunk final';
+    applySpanStyle(finalSpan, text, style, true);
+    container.insertBefore(finalSpan, pendingSpan);
+
+    // Clear the pending slot for the next phrase
+    pendingSpan.textContent = '';
+    pendingSpan.removeAttribute('style');
+
+    scheduleFade(finalSpan);
+  }
+
+  container.scrollTop = container.scrollHeight;
+}
+
+function scheduleFade(span) {
+  setTimeout(() => {
+    span.style.transition = `opacity ${FADE_DURATION}ms ease, filter ${FADE_DURATION}ms ease`;
+    span.style.opacity = '0';
+    span.style.filter  = 'blur(4px)';
+    setTimeout(() => span.remove(), FADE_DURATION);
+  }, FADE_DELAY);
+}
+
+function applySpanStyle(span, text, style, isFinal) {
+  span.textContent = text;
+  Object.assign(span.style, {
+    fontSize:      style.fontSize + 'px',
+    fontWeight:    style.fontWeight,
+    letterSpacing: style.letterSpacing + 'px',
+    opacity:       style.opacity,
+    transform:     `skewX(-${style.skewX.toFixed(2)}deg)`,
+    color:         style.color,
+    textShadow:    style.textShadow,
+    filter:        style.filter,
+    transition:    isFinal ? 'none' : 'all 0.08s ease',
+  });
+}
+
+// ── Speech pipeline ──────────────────────────────────────────────────────────
+let recognition;
+
+function setupSpeech() {
+  recognition = new SpeechRec();
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+
+  recognition.onresult = (event) => {
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const result = event.results[i];
+      renderWordChunk(result[0].transcript, { ...currentAudioState }, result.isFinal);
+    }
+  };
+
+  // Auto-restart on timeout (~60s Chrome limit)
+  recognition.onend = () => {
+    if (isListening) {
+      setTimeout(() => {
+        if (isListening) {
+          try { recognition.start(); } catch (_) {}
+        }
+      }, 150);
+    }
+  };
+
+  recognition.onerror = (e) => {
+    if (e.error === 'not-allowed') {
+      showError('Microphone access denied. Allow mic access and reload.');
+      stopListening();
+    } else if (e.error === 'aborted' || e.error === 'no-speech') {
+      // expected, ignore
+    } else {
+      console.warn('Speech recognition error:', e.error);
+    }
+  };
+}
+
+// ── App state machine ─────────────────────────────────────────────────────────
+async function startListening() {
+  try {
+    await setupAudio();
+    setupSpeech();
+    recognition.start();
+    isListening = true;
+    appState = State.LISTENING;
+    tick();
+    updateUI();
+  } catch (err) {
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      showError('Microphone access denied. Allow mic access and reload.');
+    } else {
+      showError('Could not start: ' + err.message);
+    }
+  }
+}
+
+function stopListening() {
+  isListening = false;
+  appState = State.IDLE;
+  if (recognition) {
+    try { recognition.stop(); } catch (_) {}
+  }
+  if (rafId) {
+    cancelAnimationFrame(rafId);
+    rafId = null;
+  }
+  updateUI();
+  updateMeters(0, 0);
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+const startBtn  = document.getElementById('start-btn');
+const statusEl  = document.getElementById('status');
+const volFill   = document.getElementById('vol-fill');
+const pitchFill = document.getElementById('pitch-fill');
+const errBanner = document.getElementById('error-banner');
+
+function updateUI() {
+  if (appState === State.IDLE) {
+    startBtn.textContent = 'Start';
+    startBtn.classList.remove('active');
+    statusEl.textContent = '';
+    statusEl.className = '';
+  } else {
+    startBtn.textContent = 'Stop';
+    startBtn.classList.add('active');
+    statusEl.textContent = '● listening';
+    statusEl.className = 'live';
+  }
+}
+
+function updateMeters(volume, pitch) {
+  volFill.style.width   = (volume * 100).toFixed(1) + '%';
+  pitchFill.style.width = (pitch  * 100).toFixed(1) + '%';
+}
+
+function showError(msg) {
+  errBanner.textContent = msg;
+  errBanner.style.display = 'block';
+  setTimeout(() => errBanner.style.display = 'none', 6000);
+}
+
+startBtn.addEventListener('click', () => {
+  if (appState === State.IDLE) {
+    startListening();
+  } else {
+    stopListening();
+  }
+});
+</script>
+</body>
+</html>
