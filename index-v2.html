@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Typography — Poster</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,100..900&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0d0d0f;
+      --surface: #141418;
+      --muted:   #55555f;
+      --text-ui: #aaa;
+      --text:    #eee;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Fraunces', Georgia, serif;
+    }
+
+    #app {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 48px 32px;
+    }
+
+    /* ── Phase: Record ── */
+    #phase-record { display: flex; flex-direction: column; align-items: center; gap: 28px; }
+
+    #rec-prompt { font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-ui); }
+
+    #record-btn {
+      font-family: inherit; font-size: 15px; font-weight: 600;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      padding: 16px 48px; background: transparent;
+      border: 1px solid var(--muted); color: var(--text);
+      border-radius: 4px; cursor: pointer;
+      transition: border-color 0.2s, color 0.2s, box-shadow 0.2s;
+    }
+    #record-btn:hover { border-color: #888; }
+    #record-btn.recording {
+      border-color: #c44; color: #f88;
+      box-shadow: 0 0 18px rgba(200,60,60,0.25);
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%,100% { box-shadow: 0 0 18px rgba(200,60,60,0.25); }
+      50%     { box-shadow: 0 0 32px rgba(200,60,60,0.5); }
+    }
+
+    #timer-display { font-size: 13px; letter-spacing: 0.08em; color: var(--text-ui); font-family: monospace; min-height: 1em; }
+
+    #live-meter-wrap { width: 200px; height: 3px; background: var(--muted); border-radius: 2px; overflow: hidden; }
+    #meter-fill { height: 100%; width: 0%; background: #6b9fff; border-radius: 2px; transition: width 0.04s linear; }
+
+    #rec-hint { font-size: 11px; letter-spacing: 0.06em; color: #555; text-align: center; line-height: 1.8; }
+
+    /* ── Phase: Process ── */
+    #phase-process { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; min-width: 280px; }
+    #process-title { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-ui); margin-bottom: 4px; }
+
+    .step { font-size: 14px; letter-spacing: 0.04em; color: #555; display: flex; align-items: center; gap: 10px; transition: color 0.2s; }
+    .step.active { color: var(--text); }
+    .step.done   { color: #555; }
+    .step-icon   { font-size: 12px; width: 14px; text-align: center; flex-shrink: 0; }
+    .step.active .step-icon { color: #6b9fff; }
+    .step.done   .step-icon { color: #5a5; }
+
+    /* ── Phase: Output ── */
+    #phase-output { display: flex; flex-direction: column; align-items: center; gap: 20px; width: 100%; }
+    #poster-canvas { max-width: 100%; max-height: 72vh; border: 1px solid var(--muted); display: block; }
+    #output-controls { display: flex; gap: 12px; }
+
+    .out-btn {
+      font-family: inherit; font-size: 13px; font-weight: 600;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      padding: 10px 28px; background: transparent;
+      border: 1px solid var(--muted); color: var(--text);
+      border-radius: 4px; cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .out-btn:hover { border-color: #888; }
+
+    /* ── Error banner ── */
+    #error-banner {
+      display: none; position: fixed; top: 0; left: 0; right: 0;
+      background: #500; color: #fcc; text-align: center;
+      padding: 12px 20px; font-size: 14px; z-index: 100;
+    }
+  </style>
+</head>
+<body>
+
+<div id="error-banner"></div>
+
+<div id="app">
+  <div id="phase-record">
+    <div id="rec-prompt">say something</div>
+    <button id="record-btn">● &nbsp;Record</button>
+    <div id="timer-display"></div>
+    <div id="live-meter-wrap"><div id="meter-fill"></div></div>
+    <div id="rec-hint">up to 10 seconds<br>click again or wait to stop</div>
+  </div>
+
+  <div id="phase-process" hidden>
+    <div id="process-title">Processing</div>
+    <div id="process-steps"></div>
+  </div>
+
+  <div id="phase-output" hidden>
+    <canvas id="poster-canvas" width="1200" height="800"></canvas>
+    <div id="output-controls">
+      <button class="out-btn" id="download-btn">Download PNG</button>
+      <button class="out-btn" id="record-again-btn">Record Another</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
