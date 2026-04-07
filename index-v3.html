@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Image → Label</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0d0d0f;
+      --surface: #141418;
+      --muted:   #55555f;
+      --text-ui: #aaa;
+      --text:    #eee;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Courier New', monospace;
+    }
+
+    #app {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 48px 32px;
+    }
+
+    /* ── Phase: Upload ── */
+    #phase-upload { display: flex; flex-direction: column; align-items: center; gap: 24px; }
+
+    #drop-zone {
+      width: 360px;
+      height: 240px;
+      border: 1px dashed var(--muted);
+      border-radius: 4px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      cursor: pointer;
+      transition: border-color 0.2s;
+      position: relative;
+      overflow: hidden;
+    }
+    #drop-zone:hover, #drop-zone.drag-over { border-color: #888; }
+    #drop-zone.has-image { border-style: solid; border-color: var(--muted); }
+
+    #drop-label {
+      font-size: 11px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--text-ui);
+      pointer-events: none;
+    }
+    #drop-sub {
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      color: #555;
+      pointer-events: none;
+    }
+    #drop-zone.has-image #drop-label,
+    #drop-zone.has-image #drop-sub { display: none; }
+
+    #preview-img {
+      display: none;
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0.7;
+    }
+    #drop-zone.has-image #preview-img { display: block; }
+
+    #file-input { display: none; }
+
+    #generate-btn {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      padding: 12px 40px;
+      background: transparent;
+      border: 1px solid var(--muted);
+      color: var(--text);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: border-color 0.2s, opacity 0.2s;
+      opacity: 0.3;
+      pointer-events: none;
+    }
+    #generate-btn.ready { opacity: 1; pointer-events: auto; }
+    #generate-btn.ready:hover { border-color: #888; }
+
+    /* ── Phase: Process ── */
+    #phase-process { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; min-width: 260px; }
+    #process-title { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-ui); margin-bottom: 4px; }
+
+    .step { font-size: 13px; letter-spacing: 0.04em; color: #555; display: flex; align-items: center; gap: 10px; transition: color 0.2s; }
+    .step.active { color: var(--text); }
+    .step.done   { color: #555; }
+    .step-icon   { font-size: 11px; width: 14px; text-align: center; flex-shrink: 0; }
+    .step.active .step-icon { color: #6b9fff; }
+    .step.done   .step-icon { color: #5a5; }
+
+    /* ── Phase: Output ── */
+    #phase-output { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+
+    #label-img {
+      max-width: 480px;
+      max-height: 480px;
+      border: 1px solid var(--muted);
+      display: block;
+    }
+
+    #output-meta {
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text-ui);
+      text-align: center;
+      line-height: 2;
+    }
+
+    #output-controls { display: flex; gap: 12px; }
+
+    .out-btn {
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 10px 28px;
+      background: transparent;
+      border: 1px solid var(--muted);
+      color: var(--text);
+      border-radius: 4px;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    .out-btn:hover { border-color: #888; }
+
+    /* ── Error ── */
+    #error-banner {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      background: #500;
+      color: #fcc;
+      text-align: center;
+      padding: 12px 20px;
+      font-size: 13px;
+      z-index: 100;
+    }
+  </style>
+</head>
+<body>
+
+<div id="error-banner"></div>
+
+<div id="app">
+  <div id="phase-upload">
+    <div id="drop-zone">
+      <span id="drop-label">Drop image here</span>
+      <span id="drop-sub">or click to browse</span>
+      <img id="preview-img" alt="">
+    </div>
+    <input type="file" id="file-input" accept="image/*">
+    <button id="generate-btn">Generate Label</button>
+  </div>
+
+  <div id="phase-process" hidden>
+    <div id="process-title">Generating</div>
+    <div id="process-steps">
+      <div class="step" id="step-analyze"><span class="step-icon">○</span>Analyzing image</div>
+      <div class="step" id="step-prompt"><span class="step-icon">○</span>Crafting label prompt</div>
+      <div class="step" id="step-gen"><span class="step-icon">○</span>Generating label</div>
+    </div>
+  </div>
+
+  <div id="phase-output" hidden>
+    <img id="label-img" alt="Generated label">
+    <div id="output-meta"></div>
+    <div id="output-controls">
+      <button class="out-btn" id="download-btn">Download PNG</button>
+      <button class="out-btn" id="again-btn">Try Another</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { GEMINI_KEY } from './config.js';
+
+// ── Phase helpers ─────────────────────────────────────────────────────────────
+const PHASES = ['phase-upload', 'phase-process', 'phase-output'];
+function showPhase(id) {
+  PHASES.forEach(p => { document.getElementById(p).hidden = p !== id; });
+}
+
+function stepActive(id) {
+  const el = document.getElementById('step-' + id);
+  el.classList.add('active');
+  el.querySelector('.step-icon').textContent = '◉';
+}
+function stepDone(id) {
+  const el = document.getElementById('step-' + id);
+  el.classList.remove('active');
+  el.classList.add('done');
+  el.querySelector('.step-icon').textContent = '✓';
+}
+
+// ── Image state ───────────────────────────────────────────────────────────────
+let imageDataUrl  = null; // full data URL for preview
+let imageB64      = null; // raw base64 (no prefix)
+let imageMimeType = null;
+
+function setImage(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    imageDataUrl  = e.target.result;
+    imageMimeType = file.type;
+    imageB64      = imageDataUrl.split(',')[1];
+
+    document.getElementById('preview-img').src = imageDataUrl;
+    document.getElementById('drop-zone').classList.add('has-image');
+    document.getElementById('generate-btn').classList.add('ready');
+  };
+  reader.readAsDataURL(file);
+}
+
+// Resize image before sending to Claude (keeps base64 reasonable)
+function resizeToB64(dataUrl, maxPx = 1024) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
+      const w = Math.round(img.width  * scale);
+      const h = Math.round(img.height * scale);
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      const url = c.toDataURL('image/jpeg', 0.85);
+      resolve({ b64: url.split(',')[1], mime: 'image/jpeg' });
+    };
+    img.src = dataUrl;
+  });
+}
+
+// ── Drop zone ─────────────────────────────────────────────────────────────────
+const dropZone  = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => setImage(e.target.files[0]));
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  setImage(e.dataTransfer.files[0]);
+});
+
+// ── Generate ──────────────────────────────────────────────────────────────────
+document.getElementById('generate-btn').addEventListener('click', async () => {
+  if (!imageDataUrl) return;
+  showPhase('phase-process');
+  try {
+    await runPipeline();
+  } catch (err) {
+    console.error(err);
+    showError(err.message);
+    setTimeout(resetToUpload, 5000);
+  }
+});
+
+async function runPipeline() {
+  // Resize for Gemini
+  stepActive('analyze');
+  const { b64, mime } = await resizeToB64(imageDataUrl, 1024);
+
+  // ── Step 1: Gemini Flash Lite analyzes image ─────────────────────────────
+  const geminiVisionRes = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${GEMINI_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{
+          parts: [
+            { inline_data: { mime_type: mime, data: b64 } },
+            { text: GEMINI_PROMPT },
+          ],
+        }],
+        generationConfig: { maxOutputTokens: 512, temperature: 0.7 },
+      }),
+    }
+  );
+  if (!geminiVisionRes.ok) throw new Error('Gemini API error: ' + await geminiVisionRes.text());
+  const geminiData = await geminiVisionRes.json();
+  const parsed = safeParseJSON(geminiData.candidates[0].content.parts[0].text);
+  if (!parsed?.verb) throw new Error('Could not parse Gemini response');
+
+  stepDone('analyze');
+  stepActive('prompt');
+
+  const { verb, fontDescription, imagePrompt } = parsed;
+
+  stepDone('prompt');
+  stepActive('gen');
+
+  // ── Step 2: Imagen 3 generates the label ────────────────────────────────
+  const imagenRes = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-fast-generate-001:predict?key=${GEMINI_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        instances: [{ prompt: imagePrompt }],
+        parameters: { sampleCount: 1, aspectRatio: '1:1', outputMimeType: 'image/png' },
+      }),
+    }
+  );
+  if (!imagenRes.ok) throw new Error('Imagen API error: ' + await imagenRes.text());
+  const imagenData = await imagenRes.json();
+  const labelB64   = imagenData.predictions[0].bytesBase64Encoded;
+
+  stepDone('gen');
+
+  // ── Show output ──────────────────────────────────────────────────────────
+  const labelSrc = 'data:image/png;base64,' + labelB64;
+  const labelImg = document.getElementById('label-img');
+  labelImg.src   = labelSrc;
+
+  document.getElementById('output-meta').textContent =
+    `${verb.toUpperCase()}  ·  ${fontDescription}`;
+
+  document.getElementById('download-btn').onclick = () => {
+    const a = document.createElement('a');
+    a.download = `label-${verb.toLowerCase()}.png`;
+    a.href     = labelSrc;
+    a.click();
+  };
+
+  showPhase('phase-output');
+}
+
+// ── Gemini prompt ─────────────────────────────────────────────────────────────
+const GEMINI_PROMPT = `You are a typographic label designer. Analyze this image and produce a label.
+
+Rules:
+- Choose ONE single verb (action word) that best captures the energy, motion, or feeling of the image.
+- Choose a font style that visually matches the image's character. Be specific (e.g. "heavy condensed grotesque", "thin hairline serif", "rough hand-cut woodblock", "geometric sans with wide tracking").
+- Write a DALL-E image generation prompt for a black and white label PNG:
+  - Pure white background
+  - Pure black typography only
+  - The single verb, uppercase, centered
+  - The font style you chose
+  - No decorative elements, no borders, no texture — just the word
+  - High contrast, print-quality, clean
+
+Return ONLY valid JSON, no other text:
+{"verb":"<single verb>","fontDescription":"<brief font style name>","imagePrompt":"<full DALL-E prompt>"}`;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function safeParseJSON(text) {
+  try {
+    const clean = text.replace(/^```[^\n]*\n?/, '').replace(/\n?```$/, '').trim();
+    return JSON.parse(clean);
+  } catch {}
+  try {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) return JSON.parse(match[0]);
+  } catch {}
+  return null;
+}
+
+function showError(msg) {
+  const el = document.getElementById('error-banner');
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 7000);
+}
+
+function resetToUpload() {
+  imageDataUrl = imageB64 = imageMimeType = null;
+  document.getElementById('preview-img').src = '';
+  document.getElementById('drop-zone').classList.remove('has-image');
+  document.getElementById('generate-btn').classList.remove('ready');
+  document.getElementById('file-input').value = '';
+  // reset step icons
+  ['analyze','prompt','gen'].forEach(id => {
+    const el = document.getElementById('step-' + id);
+    el.className = 'step';
+    el.querySelector('.step-icon').textContent = '○';
+  });
+  showPhase('phase-upload');
+}
+
+document.getElementById('again-btn').addEventListener('click', resetToUpload);
+</script>
+</body>
+</html>

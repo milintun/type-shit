@@ -35,14 +35,15 @@ http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': MIME['.js'] });
     res.end(
 `export const OPENAI_KEY    = '${env.OPENAI_API_KEY    || ''}';
-export const ANTHROPIC_KEY = '${env.ANTHROPIC_API_KEY || ''}';`
+export const ANTHROPIC_KEY = '${env.ANTHROPIC_API_KEY || ''}';
+export const GEMINI_KEY    = '${env.GEMINI_API_KEY    || ''}';`
     );
     return;
   }
 
   // Static file serving
   const urlPath  = req.url.split('?')[0];
-  const filePath = path.join(__dirname, urlPath === '/' ? '/index-v2.html' : urlPath);
+  const filePath = path.join(__dirname, urlPath === '/' ? '/index-v3.html' : urlPath);
 
   fs.readFile(filePath, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not found'); return; }
@@ -54,4 +55,4 @@ export const ANTHROPIC_KEY = '${env.ANTHROPIC_API_KEY || ''}';`
     res.end(data);
   });
 
-}).listen(3000, () => console.log('http://localhost:3000/index-v2.html'));
+}).listen(3000, () => console.log('http://localhost:3000'));
