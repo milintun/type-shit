@@ -55,4 +55,8 @@ export const GEMINI_KEY    = '${env.GEMINI_API_KEY    || ''}';`
     res.end(data);
   });
 
-}).listen(3000, () => console.log('http://localhost:3000'));
+}).listen(3000, () => {
+  console.log('v2  http://localhost:3000/index-v2.html');
+  console.log('v3  http://localhost:3000/index-v3.html');
+  console.log('v4  http://localhost:3000/index-v4.html  (arduino serial)');
+});
