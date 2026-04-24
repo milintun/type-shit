@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Typography — Arduino + Printer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,100..900&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:      #0d0d0f;
+      --surface: #141418;
+      --muted:   #55555f;
+      --text-ui: #aaa;
+      --text:    #eee;
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Fraunces', Georgia, serif;
+    }
+
+    #app {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 48px 32px;
+    }
+
+    /* ── Serial connect ── */
+    #phase-connect { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+    #connect-btn {
+      font-family: inherit; font-size: 15px; font-weight: 600;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      padding: 16px 48px; background: transparent;
+      border: 1px solid var(--muted); color: var(--text);
+      border-radius: 4px; cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    #connect-btn:hover { border-color: #888; }
+    #serial-status { font-size: 12px; letter-spacing: 0.08em; color: var(--muted); }
+
+    /* ── Phase: Record ── */
+    #phase-record { display: flex; flex-direction: column; align-items: center; gap: 28px; }
+
+    #rec-prompt { font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-ui); }
+
+    #record-status {
+      font-family: inherit; font-size: 15px; font-weight: 600;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      padding: 16px 48px; background: transparent;
+      border: 1px solid var(--muted); color: var(--text);
+      border-radius: 4px;
+    }
+    #record-status.recording {
+      border-color: #c44; color: #f88;
+      box-shadow: 0 0 18px rgba(200,60,60,0.25);
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%,100% { box-shadow: 0 0 18px rgba(200,60,60,0.25); }
+      50%     { box-shadow: 0 0 32px rgba(200,60,60,0.5); }
+    }
+
+    #timer-display { font-size: 13px; letter-spacing: 0.08em; color: var(--text-ui); font-family: monospace; min-height: 1em; }
+
+    #live-meter-wrap { width: 200px; height: 3px; background: var(--muted); border-radius: 2px; overflow: hidden; }
+    #meter-fill { height: 100%; width: 0%; background: #6b9fff; border-radius: 2px; transition: width 0.04s linear; }
+
+    #rec-hint { font-size: 11px; letter-spacing: 0.06em; color: #555; text-align: center; line-height: 1.8; }
+
+    /* ── Phase: Process ── */
+    #phase-process { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; min-width: 280px; }
+    #process-title { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-ui); margin-bottom: 4px; }
+
+    .step { font-size: 14px; letter-spacing: 0.04em; color: #555; display: flex; align-items: center; gap: 10px; transition: color 0.2s; }
+    .step.active { color: var(--text); }
+    .step.done   { color: #555; }
+    .step-icon   { font-size: 12px; width: 14px; text-align: center; flex-shrink: 0; }
+    .step.active .step-icon { color: #6b9fff; }
+    .step.done   .step-icon { color: #5a5; }
+
+    /* ── Phase: Output ── */
+    #phase-output { display: flex; flex-direction: column; align-items: center; gap: 20px; }
+    #label-img { max-width: 480px; max-height: 480px; border: 1px solid var(--muted); display: block; }
+    #output-meta { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-ui); text-align: center; line-height: 2; }
+    #output-controls { display: flex; gap: 12px; }
+
+    .out-btn {
+      font-family: inherit; font-size: 13px; font-weight: 600;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      padding: 10px 28px; background: transparent;
+      border: 1px solid var(--muted); color: var(--text);
+      border-radius: 4px; cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+    }
+    .out-btn:hover { border-color: #888; }
+
+    /* ── Error banner ── */
+    #error-banner {
+      display: none; position: fixed; top: 0; left: 0; right: 0;
+      background: #500; color: #fcc; text-align: center;
+      padding: 12px 20px; font-size: 14px; z-index: 100;
+    }
+  </style>
+</head>
+<body>
+
+<div id="error-banner"></div>
+
+<div id="app">
+  <div id="phase-connect">
+    <div style="font-size: 13px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-ui);">
+      connect arduino
+    </div>
+    <button id="connect-btn">Connect Serial</button>
+    <div id="serial-status">waiting for connection</div>
+  </div>
+
+  <div id="phase-record" hidden>
+    <div id="rec-prompt">hold button to record</div>
+    <div id="record-status">Waiting</div>
+    <div id="timer-display"></div>
+    <div id="live-meter-wrap"><div id="meter-fill"></div></div>
+    <div id="rec-hint">hold the button to record · release to stop</div>
+  </div>
+
+  <div id="phase-process" hidden>
+    <div id="process-title">Processing</div>
+    <div id="process-steps"></div>
+  </div>
+
+  <div id="phase-output" hidden>
+    <img id="label-img" alt="Generated label">
+    <div id="output-meta"></div>
+    <div id="output-controls">
+      <button class="out-btn" id="download-btn">Download PNG</button>
+      <button class="out-btn" id="record-again-btn">Record Another</button>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { transcribeAudio }      from './pipeline/transcribe.js';
+import { extractAudioFeatures } from './pipeline/audioFeatures.js';
+import { GEMINI_KEY, ANTHROPIC_KEY } from './config.js';
+
+// ── Phase management ──────────────────────────────────────────────────────────
+const PHASES = ['phase-connect', 'phase-record', 'phase-process', 'phase-output'];
+function showPhase(id) {
+  PHASES.forEach(p => { document.getElementById(p).hidden = p !== id; });
+}
+
+// ── Serial connection ─────────────────────────────────────────────────────────
+let port = null;
+let reader = null;
+let serialAbort = null;
+
+document.getElementById('connect-btn').addEventListener('click', async () => {
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 9600 });
+    document.getElementById('serial-status').textContent = 'connected';
+    showPhase('phase-record');
+    readSerial();
+  } catch (err) {
+    document.getElementById('serial-status').textContent = 'connection failed';
+    console.error(err);
+  }
+});
+
+async function readSerial() {
+  serialAbort = new AbortController();
+  const decoder = new TextDecoderStream();
+  port.readable.pipeTo(decoder.writable, { signal: serialAbort.signal }).catch(() => {});
+  reader = decoder.readable.getReader();
+
+  let buffer = '';
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += value;
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        const cmd = line.trim();
+        if (cmd === 'START') onSerialStart();
+        else if (cmd === 'STOP') onSerialStop();
+      }
+    }
+  } catch (e) {
+    // reader cancelled during serial release — expected
+    console.log('Serial reader stopped:', e.message);
+  }
+}
+
+async function releaseSerial() {
+  if (serialAbort) { serialAbort.abort(); serialAbort = null; }
+  if (reader) {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+    reader = null;
+  }
+  // Wait a tick for streams to fully unlock
+  await new Promise(r => setTimeout(r, 100));
+  if (port) { await port.close(); }
+}
+
+async function reopenSerial() {
+  if (port) {
+    await port.open({ baudRate: 9600 });
+    readSerial();
+  }
+}
+
+// ── Recording state ───────────────────────────────────────────────────────────
+let mediaRecorder   = null;
+let audioChunks     = [];
+let recordingStream = null;
+let audioCtx        = null;
+let analyserNode    = null;
+let meterRafId      = null;
+let timerInterval   = null;
+let startTime       = null;
+
+// ── Live level meter ──────────────────────────────────────────────────────────
+function startMeter(stream) {
+  audioCtx = new AudioContext();
+  const src = audioCtx.createMediaStreamSource(stream);
+  analyserNode = audioCtx.createAnalyser();
+  analyserNode.fftSize = 1024;
+  src.connect(analyserNode);
+
+  const buf  = new Uint8Array(analyserNode.fftSize);
+  const fill = document.getElementById('meter-fill');
+  function tick() {
+    meterRafId = requestAnimationFrame(tick);
+    analyserNode.getByteTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) { const v = (buf[i] - 128) / 128; sum += v * v; }
+    fill.style.width = Math.min(100, Math.sqrt(sum / buf.length) * 300) + '%';
+  }
+  tick();
+}
+
+function stopMeter() {
+  cancelAnimationFrame(meterRafId);
+  document.getElementById('meter-fill').style.width = '0%';
+}
+
+// ── Timer ─────────────────────────────────────────────────────────────────────
+function startTimer() {
+  startTime = Date.now();
+  const el = document.getElementById('timer-display');
+  timerInterval = setInterval(() => {
+    el.textContent = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
+  }, 100);
+}
+
+function stopTimer() { clearInterval(timerInterval); }
+
+// ── Serial commands → recording ───────────────────────────────────────────────
+async function onSerialStart() {
+  audioChunks = [];
+  try {
+    recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch {
+    showError('Microphone access denied. Allow mic access and reload.');
+    return;
+  }
+
+  startMeter(recordingStream);
+  startTimer();
+
+  mediaRecorder = new MediaRecorder(recordingStream);
+  mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+  mediaRecorder.onstop = onRecordingStop;
+  mediaRecorder.start(100);
+
+  const el = document.getElementById('record-status');
+  el.textContent = '● Recording';
+  el.classList.add('recording');
+}
+
+function onSerialStop() {
+  if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+  mediaRecorder.stop();
+  recordingStream.getTracks().forEach(t => t.stop());
+  stopTimer();
+  stopMeter();
+}
+
+// ── Pipeline entry ────────────────────────────────────────────────────────────
+async function onRecordingStop() {
+  const blob = new Blob(audioChunks, { type: 'audio/webm' });
+  showPhase('phase-process');
+  try {
+    await runPipeline(blob);
+  } catch (err) {
+    console.error(err);
+    showError(err.message);
+    setTimeout(resetToRecord, 4000);
+  }
+}
+
+// ── Step indicators ───────────────────────────────────────────────────────────
+const STEP_DEFS = [
+  { id: 'transcribe', label: 'Transcribing'     },
+  { id: 'analyze',    label: 'Choosing font'     },
+  { id: 'generate',   label: 'Generating image'  },
+  { id: 'print',      label: 'Printing'          },
+];
+
+function initSteps() {
+  document.getElementById('process-steps').innerHTML =
+    STEP_DEFS.map(s =>
+      `<div class="step" id="step-${s.id}"><span class="step-icon">○</span>${s.label}</div>`
+    ).join('');
+}
+
+function stepActive(id) {
+  const el = document.getElementById('step-' + id);
+  if (!el) return;
+  el.classList.add('active');
+  el.querySelector('.step-icon').textContent = '◉';
+}
+
+function stepDone(id) {
+  const el = document.getElementById('step-' + id);
+  if (!el) return;
+  el.classList.remove('active');
+  el.classList.add('done');
+  el.querySelector('.step-icon').textContent = '✓';
+}
+
+// ── Gemini prompt ─────────────────────────────────────────────────────────────
+function buildGeminiPrompt(transcript, avgVolume) {
+  const volumeLabel = avgVolume > 0.65 ? 'LOUD / SHOUTING'
+                    : avgVolume > 0.35 ? 'normal conversational'
+                    : 'quiet / whispering';
+  return `You are an avant-garde typographic artist. You create wildly expressive, abstract letterforms that embody the FEELING and MEANING of words.
+
+Transcript: "${transcript}"
+Volume: ${volumeLabel} (${(avgVolume * 100).toFixed(0)}%)
+
+Your job: deeply analyze the transcript's meaning, emotion, and energy, then design typography that IS the feeling — with PER-WORD variation in size, weight, and italic to create expressive hierarchy.
+
+EXAMPLES of the range you should aim for:
+- "I'm feeling very proper and professional" → ultra-refined engraved copperplate with impossibly thin hairlines, "proper" and "professional" massive and heavy, filler words tiny and light
+- "oohaah" → blobby, organic, hand-drawn letterforms, each sound a different scale
+- "I'M SO ANGRY RIGHT NOW" → jagged fractured blackletter, "ANGRY" enormous and ultra-bold, "so" tiny italic
+- "the void consumes" → impossibly tall stretched skeletal letters, "VOID" towering over the rest, "the" barely visible
+- "shhh be quiet" → whisper-thin ghost letters, "shhh" stretched wide and featherlight, "quiet" in tiny delicate italic
+- "BOOM" → massive impact typography, fills the entire frame
+- "elegance" → calligraphic flourished Didot with extreme thick-thin contrast
+- "chaos" → overlapping, rotated, mismatched letterforms at random angles and wildly different sizes
+
+PER-WORD VARIATION RULES:
+- Important/emotional/key words → LARGE, heavy weight, uppercase, dominant
+- Filler words (the, a, is, and, of, to, it, I'm) → small, light weight, lowercase
+- Words with feeling → italic or stylistic emphasis
+- Create dramatic size contrast — key words 3-5x bigger than filler words
+- Volume affects baseline intensity: loud = bolder/heavier overall, quiet = lighter/thinner overall
+
+CRITICAL RULES:
+- The typographic style MUST be radically different for every transcript
+- Push to extremes. Exaggerate. Be theatrical
+- Pure white background, pure black text ONLY — no color, no gray
+- All expression lives in the letterforms: their style, size, weight, italic, spacing, arrangement
+- No decorative elements, no images, no borders — ONLY black letters on white
+- High contrast, clean, print-quality
+- Every generation should feel like a unique typographic art piece
+
+Return ONLY valid JSON, no other text:
+{"fontDescription":"<vivid 3-5 word style name>","imagePrompt":"<detailed prompt describing letterform style AND specific per-word size/weight/italic variation>"}`;
+}
+
+// ── Full pipeline ─────────────────────────────────────────────────────────────
+async function runPipeline(blob) {
+  initSteps();
+
+  // Step 1: Transcribe
+  stepActive('transcribe');
+  const wordTimestamps = await transcribeAudio(blob);
+  if (!wordTimestamps.length) throw new Error('No words detected in recording.');
+  const transcript = wordTimestamps.map(w => w.word).join(' ');
+
+  // Compute average volume
+  const arrayBuffer = await blob.arrayBuffer();
+  if (audioCtx.state === 'suspended') await audioCtx.resume();
+  const audioBuffer   = await audioCtx.decodeAudioData(arrayBuffer);
+  const wordsWithAudio = extractAudioFeatures(audioBuffer, wordTimestamps);
+  const avgVolume = wordsWithAudio.reduce((s, w) => s + w.volume, 0) / wordsWithAudio.length;
+  stepDone('transcribe');
+
+  // Step 2: Gemini picks font style
+  stepActive('analyze');
+  const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key':                               ANTHROPIC_KEY,
+      'anthropic-version':                       '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+      'content-type':                            'application/json',
+    },
+    body: JSON.stringify({
+      model:      'claude-sonnet-4-20250514',
+      max_tokens: 768,
+      temperature: 1.0,
+      messages:   [{ role: 'user', content: buildGeminiPrompt(transcript, avgVolume) }],
+    }),
+  });
+  if (!claudeRes.ok) throw new Error('Claude API error: ' + await claudeRes.text());
+  const claudeData = await claudeRes.json();
+  const parsed = safeParseJSON(claudeData.content[0].text);
+  if (!parsed?.imagePrompt) throw new Error('Could not parse Claude response');
+  const { fontDescription, imagePrompt } = parsed;
+  stepDone('analyze');
+
+  // Step 3: Imagen generates the label
+  stepActive('generate');
+  const imagenRes = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/imagen-4.0-fast-generate-001:predict?key=${GEMINI_KEY}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        instances: [{ prompt: imagePrompt }],
+        parameters: { sampleCount: 1, aspectRatio: '1:1', outputMimeType: 'image/png' },
+      }),
+    }
+  );
+  if (!imagenRes.ok) throw new Error('Imagen API error: ' + await imagenRes.text());
+  const imagenData = await imagenRes.json();
+  const labelB64Raw = imagenData.predictions[0].bytesBase64Encoded;
+  stepDone('generate');
+
+  // Auto-crop whitespace
+  const labelB64 = await autoCrop(labelB64Raw);
+
+  // Show output immediately (right side up)
+  const labelSrc = 'data:image/png;base64,' + labelB64;
+  document.getElementById('label-img').src = labelSrc;
+  document.getElementById('output-meta').innerHTML =
+    `"${transcript}"  ·  ${fontDescription}  ·  vol ${(avgVolume * 100).toFixed(0)}%<br><br><span style="font-size:10px;color:#666;text-transform:none;letter-spacing:0.02em;line-height:1.6">${imagePrompt}</span>`;
+
+  document.getElementById('download-btn').onclick = () => {
+    const a = document.createElement('a');
+    a.download = `label-${transcript.slice(0, 20).replace(/\s+/g, '-').toLowerCase()}.png`;
+    a.href     = labelSrc;
+    a.click();
+  };
+
+  showPhase('phase-output');
+
+  // Step 4: Release serial, rotate 180°, print, then reconnect
+  stepActive('print');
+  await releaseSerial();
+  await new Promise(r => setTimeout(r, 500)); // let OS release the port
+  const rotatedB64 = await rotateImage180(labelB64);
+  const printRes = await fetch('/print', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ imageBase64: rotatedB64 }),
+  });
+  if (!printRes.ok) {
+    const printErr = await printRes.json().catch(() => ({}));
+    console.error('Print failed:', printErr.error);
+    showError('Print failed: ' + (printErr.error || 'unknown error'));
+  }
+  await reopenSerial();
+  stepDone('print');
+}
+
+// ── Auto-crop whitespace from image ──────────────────────────────────────────
+function autoCrop(b64, padding = 16) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+
+      let top = canvas.height, left = canvas.width, bottom = 0, right = 0;
+      for (let y = 0; y < canvas.height; y++) {
+        for (let x = 0; x < canvas.width; x++) {
+          const i = (y * canvas.width + x) * 4;
+          // non-white pixel (check if any channel < 250)
+          if (data[i] < 250 || data[i+1] < 250 || data[i+2] < 250) {
+            if (y < top) top = y;
+            if (y > bottom) bottom = y;
+            if (x < left) left = x;
+            if (x > right) right = x;
+          }
+        }
+      }
+
+      if (bottom <= top || right <= left) {
+        // no content found, return original
+        resolve(b64);
+        return;
+      }
+
+      // apply padding
+      top    = Math.max(0, top - padding);
+      left   = Math.max(0, left - padding);
+      bottom = Math.min(canvas.height - 1, bottom + padding);
+      right  = Math.min(canvas.width - 1, right + padding);
+
+      const w = right - left + 1;
+      const h = bottom - top + 1;
+      const cropped = document.createElement('canvas');
+      cropped.width = w;
+      cropped.height = h;
+      const cCtx = cropped.getContext('2d');
+      cCtx.fillStyle = '#ffffff';
+      cCtx.fillRect(0, 0, w, h);
+      cCtx.drawImage(canvas, left, top, w, h, 0, 0, w, h);
+      resolve(cropped.toDataURL('image/png').split(',')[1]);
+    };
+    img.onerror = reject;
+    img.src = 'data:image/png;base64,' + b64;
+  });
+}
+
+// ── Rotate image 180° via canvas ─────────────────────────────────────────────
+function rotateImage180(b64) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.translate(img.width, img.height);
+      ctx.rotate(Math.PI);
+      ctx.drawImage(img, 0, 0);
+      resolve(canvas.toDataURL('image/png').split(',')[1]);
+    };
+    img.onerror = reject;
+    img.src = 'data:image/png;base64,' + b64;
+  });
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function safeParseJSON(text) {
+  try {
+    const clean = text.replace(/^```[^\n]*\n?/, '').replace(/\n?```$/, '').trim();
+    return JSON.parse(clean);
+  } catch {}
+  try {
+    const match = text.match(/\{[\s\S]*\}/);
+    if (match) return JSON.parse(match[0]);
+  } catch {}
+  return null;
+}
+
+// ── Output controls ───────────────────────────────────────────────────────────
+document.getElementById('record-again-btn').addEventListener('click', resetToRecord);
+
+function resetToRecord() {
+  const el = document.getElementById('record-status');
+  el.textContent = 'Waiting';
+  el.classList.remove('recording');
+  document.getElementById('timer-display').textContent = '';
+  mediaRecorder = null;
+  showPhase('phase-record');
+}
+
+// ── Error banner ──────────────────────────────────────────────────────────────
+function showError(msg) {
+  const el = document.getElementById('error-banner');
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 7000);
+}
+</script>
+</body>
+</html>

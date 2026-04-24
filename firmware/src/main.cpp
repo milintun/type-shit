@@ -4,7 +4,7 @@ const int BUTTON_PIN = 7;
 const int LED_PIN    = 5;
 
 bool lastButtonState = HIGH;
-bool buttonState     = LOW;
+bool buttonState     = HIGH;
 
 unsigned long lastDebounce = 0;
 const unsigned long DEBOUNCE_MS = 50;
@@ -27,14 +27,14 @@ void loop() {
     if (reading != buttonState) {
       buttonState = reading;
 
-      if (buttonState == HIGH) {
+      if (buttonState == LOW) {
         // button pressed down → start recording
         digitalWrite(LED_PIN, HIGH);
-        Serial.println("START");
+        Serial.println("STOP");
       } else {
         // button released → stop recording
         digitalWrite(LED_PIN, LOW);
-        Serial.println("STOP");
+        Serial.println("START");
       }
     }
   }
