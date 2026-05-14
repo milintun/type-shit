@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
 """Send a bitmap image to the QR204 thermal printer via Arduino serial passthrough."""
 
-import sys
 import os
 import struct
 import time
 from PIL import Image
 
-SERIAL_PORT = "/dev/cu.usbmodem1101"
+SERIAL_PORT = "/dev/cu.usbmodem2101"
 PRINTER_WIDTH = 384  # 58mm printer = 384 dots wide
 
 
-def image_to_escpos(img_path):
+def image_to_escpos(img_path, rotate=False):
     """Convert image to ESC/POS bitmap bytes."""
     img = Image.open(img_path)
+
+    if rotate:
+        img = img.rotate(-90, expand=True)
 
     # Handle transparency — paste onto white background
     if img.mode in ("RGBA", "LA", "P"):
@@ -45,23 +47,27 @@ def image_to_escpos(img_path):
                     byte |= 1 << (7 - bit)
             bitmap.append(byte)
 
+    # Heat settings: maxHeatDots=8, heatTime=80, heatInterval=60
+    heat_cmd = struct.pack("5B", 0x1B, 0x37, 8, 80, 60)
+
     # Build GS v 0 command header
     header = struct.pack("4B", 0x1D, 0x76, 0x30, 0x00)
     header += struct.pack("<H", width_bytes)
     header += struct.pack("<H", height)
 
     print(f"  Image: {PRINTER_WIDTH}x{height}, {len(bitmap)} bitmap bytes")
-    return header + bytes(bitmap)
+    return heat_cmd + header + bytes(bitmap)
 
 
 def main():
-    if len(sys.argv) < 2:
-        print(f"Usage: python {sys.argv[0]} <image_path>")
-        sys.exit(1)
+    import argparse
+    parser = argparse.ArgumentParser(description="Print bitmap to thermal printer via serial")
+    parser.add_argument("image", help="Image file to print")
+    parser.add_argument("-r", "--rotate", action="store_true", help="Rotate 90° (label maker style)")
+    args = parser.parse_args()
 
-    img_path = sys.argv[1]
-    print(f"Converting {img_path}...")
-    data = image_to_escpos(img_path)
+    print(f"Converting {args.image}{'  (rotated 90°)' if args.rotate else ''}...")
+    data = image_to_escpos(args.image, rotate=args.rotate)
     print(f"Total data: {len(data)} bytes")
 
     print(f"Sending to {SERIAL_PORT}...")
@@ -72,7 +78,7 @@ def main():
     chunk_size = 128
     for i in range(0, len(data), chunk_size):
         os.write(fd, data[i : i + chunk_size])
-        time.sleep(0.15)  # 128 bytes at 9600 baud = ~133ms
+        time.sleep(0.25)  # extra cooling time between chunks
         if i > 0 and i % 2000 == 0:
             print(f"  Sent {i}/{len(data)} bytes...")
 
