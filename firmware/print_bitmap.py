@@ -43,7 +43,7 @@ def image_to_escpos(img_path, rotate=False):
             for bit in range(8):
                 x = x_byte * 8 + bit
                 px = pixels[y * PRINTER_WIDTH + x]
-                if px < 128:  # Dark pixel = print
+                if px < 160:  # Dark pixel = print
                     byte |= 1 << (7 - bit)
             bitmap.append(byte)
 
@@ -78,14 +78,14 @@ def main():
     chunk_size = 128
     for i in range(0, len(data), chunk_size):
         os.write(fd, data[i : i + chunk_size])
-        time.sleep(0.25)  # extra cooling time between chunks
+        time.sleep(0.6)  # cooling time between chunks — prevents head overheat
         if i > 0 and i % 2000 == 0:
             print(f"  Sent {i}/{len(data)} bytes...")
 
-    # Feed paper
-    time.sleep(0.5)
-    os.write(fd, b"\x1b\x64\x04")
-    time.sleep(1)
+    # # Feed paper
+    # time.sleep(0.5)
+    # os.write(fd, b"\x1b\x64\x04")
+    # time.sleep(1)
 
     os.close(fd)
     print("Done!")

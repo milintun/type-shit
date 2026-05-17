@@ -56,8 +56,8 @@ def image_to_escpos(img_path):
             bitmap.append(byte)
 
     # Heat settings: ESC 7 maxHeatDots heatTime heatInterval
-    # maxHeatDots=11 (more dots at once), heatTime=120 (longer burn), heatInterval=40
-    heat_cmd = struct.pack("5B", 0x1B, 0x37, 11, 120, 40)
+    # Conservative: fewer dots at once, shorter burn, longer cooldown
+    heat_cmd = struct.pack("5B", 0x1B, 0x37, 7, 80, 50)
 
     # Build GS v 0 command header
     header = struct.pack("4B", 0x1D, 0x76, 0x30, 0x00)
@@ -96,7 +96,10 @@ def send_to_xiao(data, xiao_url):
         host, port_str = host.rsplit(":", 1)
         port = int(port_str)
 
-    chunk_size = 512
+    # 128-byte chunks: small enough that XIAO's serial buffer never lags behind.
+    # Delay = bytes * 0.0015s ≈ slightly slower than 9600 baud (1/960 ≈ 0.00104s/byte)
+    # so each chunk fully forwards to the printer before the next arrives.
+    chunk_size = 128
     total = len(data)
 
     print(f"Sending {total} bytes to {xiao_url}/print in {chunk_size}-byte chunks...")
@@ -115,15 +118,14 @@ def send_to_xiao(data, xiao_url):
             print(f"  Error at byte {i}: {e}")
             return False
 
-        # Pace to match 9600 baud
-        delay = len(chunk) * 0.0012
+        delay = len(chunk) * 0.0015
         time.sleep(delay)
 
         if i > 0 and i % 2000 == 0:
             print(f"  Sent {i}/{total} bytes...")
 
-    # Send paper feed — multiple blank lines for clean tear-off
-    time.sleep(0.5)  # let printer finish bitmap
+    # Send paper feed — give printer time to finish the last bitmap row
+    time.sleep(1.5)
     try:
         feed_cmd = b"\x1b\x64\x08"  # ESC d 8 — feed 8 lines
         conn = make_bound_connection(host, port)

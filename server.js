@@ -108,5 +108,6 @@ export const GEMINI_KEY    = '${env.GEMINI_API_KEY    || ''}';`
   console.log('v2  http://localhost:3000/index-v2.html');
   console.log('v3  http://localhost:3000/index-v3.html');
   console.log('v4  http://localhost:3000/index-v4.html  (arduino serial)');
-  console.log('v4  http://localhost:3000/index-v5.html  (+printer serial)');
+  console.log('v5  http://localhost:3000/index-v5.html  (+printer serial)');
+  console.log('v6  http://localhost:3000/index-v6.html  (+printer wireless)');
 });
